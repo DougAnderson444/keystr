@@ -1,0 +1,2 @@
+serve:
+  RUST_LOG=info dx serve --port 8081
