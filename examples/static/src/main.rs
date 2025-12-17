@@ -1,9 +1,9 @@
 //! Static website which allows users to create and use plogs.
-use dioxus::prelude::*;
+use dioxus::{logger::tracing, prelude::*};
+use keystr_client::Keystr;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
-const HEADER_SVG: Asset = asset!("/assets/header.svg");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
@@ -14,7 +14,7 @@ fn main() {
 fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS } document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         Hero {}
 
     }
@@ -23,17 +23,26 @@ fn App() -> Element {
 #[component]
 pub fn Hero() -> Element {
     rsx! {
-        div {
-            id: "hero",
-            img { src: HEADER_SVG, id: "header" }
-            div { id: "links",
-                a { href: "https://dioxuslabs.com/learn/0.7/", "📚 Learn Dioxus" }
-                a { href: "https://dioxuslabs.com/awesome", "🚀 Awesome Dioxus" }
-                a { href: "https://github.com/dioxus-community/", "📡 Community Libraries" }
-                a { href: "https://github.com/DioxusLabs/sdk", "⚙️ Dioxus Development Kit" }
-                a { href: "https://marketplace.visualstudio.com/items?itemName=DioxusLabs.dioxus", "💫 VSCode Extension" }
-                a { href: "https://discord.gg/XgGxMSkvUM", "👋 Community Discord" }
-            }
+        NewPlog {}
+    }
+}
+
+/// New user create Plog component
+/// Just a button that calls the client side plog creation function
+#[component]
+pub fn NewPlog() -> Element {
+    let create_plog = |_| {
+        // Call client side plog creation function
+        // This is just a placeholder
+        tracing::info!("Create Plog button clicked");
+        let keystr = Keystr::new();
+    };
+
+    rsx! {
+        button {
+            class: "bg-blue-500 hover:bg-blue-700 text-white font-semi-bold py-2 px-4 rounded",
+            onclick: create_plog,
+            "Create New Plog"
         }
     }
 }

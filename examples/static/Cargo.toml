@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 dioxus = { version = "0.7.1", features = [] }
+keystr-client = { path = "../../crates/client" }
 
 [features]
 default = ["web"]
