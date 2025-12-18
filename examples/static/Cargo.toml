@@ -11,6 +11,8 @@ dioxus = { version = "0.7.1", features = [] }
 keystr-client = { path = "../../crates/client" }
 bs = { path = "../../../../clones/bs/crates/bs" }
 multicodec = { path = "../../../../clones/bs/crates/multicodec" }
+multicid = { path = "../../../../clones/bs/crates/multicid" }
+multihash = { path = "../../../../clones/bs/crates/multihash" }
 provenance-log = { path = "../../../../clones/bs/crates/provenance-log" }
 getrandom = { version = "0.2", features = ["js"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }

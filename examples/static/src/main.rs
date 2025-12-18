@@ -13,6 +13,11 @@ use keystr_client::key_manager::Wallet;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use keystr_client::passkey_wallet::PasskeyWallet;
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use multicid::{cid, Vlad};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use multihash::mh;
+
 use multicodec::Codec;
 use provenance_log::{Key, Script};
 
@@ -99,30 +104,58 @@ pub fn NewPlog() -> Element {
 
 async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     tracing::info!("Creating wallet...");
-    
+
     // Use PasskeyWallet in browser, regular Wallet otherwise
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     let (wallet, pubkey_codec) = {
         tracing::info!("Creating PasskeyWallet for browser...");
+
+        // Generate vlad first to use as passkey identifier
+        let vlad = {
+            // Create a random cid for vlad generation
+            let random_bytes = {
+                let mut buf = [0u8; 32];
+                getrandom::getrandom(&mut buf)?;
+                buf
+            };
+
+            let cid = cid::Builder::new(Codec::Cidv1)
+                .with_target_codec(Codec::DagCbor)
+                .with_hash(
+                    &mh::Builder::new_from_bytes(Codec::Sha3512, &random_bytes)?.try_build()?,
+                )
+                .try_build()?;
+
+            // Generate vlad from ephemeral signature
+            Vlad::generate(&cid, |cid| {
+                let v: Vec<u8> = cid.clone().into();
+                Ok(v)
+            })?
+        };
+
         let user_id = {
             let mut buf = [0u8; 16];
             getrandom::getrandom(&mut buf)?;
             buf.to_vec()
         };
         tracing::debug!("Generated user_id: {} bytes", user_id.len());
-        
+
+        // Use vlad's Display implementation for the username
+        let vlad_string = vlad.to_string();
+        tracing::info!("Using vlad as passkey username: {}", vlad_string);
+
         let wallet: PasskeyWallet<bs::Error> = PasskeyWallet::new(
             web_sys::window()
                 .and_then(|w| w.location().hostname().ok())
                 .unwrap_or_else(|| "localhost".to_string()),
             "Keystr Provenance Log".to_string(),
-            "demo_user".to_string(),
+            vlad_string,
             user_id,
         );
         tracing::info!("PasskeyWallet created with rp_id: {}", wallet.rp_id());
         (wallet, Codec::P256Pub)
     };
-    
+
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     let (wallet, pubkey_codec) = {
         tracing::info!("Creating standard Wallet (non-browser)...");
@@ -133,12 +166,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     tracing::debug!("Using pubkey_codec: {:?}", pubkey_codec);
     let config = open::Config::builder()
         .vlad(VladParams::default())
-        .pubkey(
-            PubkeyParams::builder()
-                .codec(pubkey_codec)
-                .build()
-                .into(),
-        )
+        .pubkey(PubkeyParams::builder().codec(pubkey_codec).build().into())
         .entrykey(
             FirstEntryKeyParams::builder()
                 .codec(Codec::Ed25519Priv)
