@@ -8,11 +8,21 @@ tracing.workspace = true
 thiserror.workspace = true
 bs = { path = "../../../../clones/bs/crates/bs" }
 bs-traits = { path = "../../../../clones/bs/crates/bs-traits" }
+multicodec = { path = "../../../../clones/bs/crates/multicodec" }
+multikey = { path = "../../../../clones/bs/crates/multikey" }
+multihash = { path = "../../../../clones/bs/crates/multihash" }
+multicid = { path = "../../../../clones/bs/crates/multicid" }
+multisig = { path = "../../../../clones/bs/crates/multisig" }
+provenance-log = { path = "../../../../clones/bs/crates/provenance-log" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_cbor = "0.11"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 log = "0.4.21"
 base64 = "0.22.1"
+rand = "0.8"
+ed25519-dalek = "2.1"
+rand_core_6 = { package = "rand_core", version = "0.6" }
 
 # optional for web feature only 
 wasm-bindgen = { version = "0.2.92", optional = true }
@@ -31,6 +41,8 @@ web-sys = { version = "0.3.83", features = [
   "AuthenticatorSelectionCriteria",
   "AuthenticatorAttachment",
   "UserVerificationRequirement",
+  "AttestationConveyancePreference",
+  "ResidentKeyRequirement",
   "Window",
   "Navigator",
   "AuthenticatorResponse",
@@ -39,10 +51,7 @@ web-sys = { version = "0.3.83", features = [
   "Location",
 ], optional = true }
 base64-url = { version = "3.0.2", optional = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
-
+getrandom = { version = "0.3", optional = true }
 
 [features]
 default = ["web"]
@@ -53,4 +62,5 @@ web = [
   "js-sys",
   "web-sys",
   "base64-url",
+  "getrandom/wasm_js",
 ]
