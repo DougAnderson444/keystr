@@ -5,7 +5,7 @@ mod error;
 pub use error::{Error, Result};
 
 pub mod key_manager;
-pub use key_manager::Wallet;
+pub use key_manager::{KeyManager, P256Signer, Wallet};
 
 /// Some references to webauthn functionality
 mod webauthn;
@@ -18,7 +18,7 @@ mod cbor_utils;
 pub mod passkey_wallet;
 
 #[cfg(feature = "web")]
-pub use passkey_wallet::PasskeyWallet;
+pub use passkey_wallet::{PasskeyKeyManager, PasskeyP256Signer, PasskeyStore};
 
 use bs::open_plog;
 
@@ -29,8 +29,10 @@ impl Keystr {
     /// Create a new Keystr client
     pub async fn new() -> Result<Self> {
         let config = config::GenerationConfig::default();
-        let key_manager = key_manager::Wallet::default();
-        let _plog = open_plog(&config, &key_manager, &key_manager).await?;
+        let wallet = key_manager::Wallet::default();
+        let mut key_manager = KeyManager::new(wallet.clone());
+        let signer = P256Signer::new(wallet);
+        let _plog = open_plog(&config, &mut key_manager, &signer).await?;
         Ok(Keystr {})
     }
 }

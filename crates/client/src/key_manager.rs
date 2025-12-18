@@ -1,9 +1,8 @@
-//! Implements the [bs::KeyManager] trait for managing keys in the Keystr client.
+//! Implements the [bs_traits] for managing keys in the Keystr client.
 use bs::prelude::{Signature, multihash, multikey};
-use bs_traits::Signer;
 use bs_traits::asyncro::{AsyncKeyManager, AsyncMultiSigner, AsyncSigner, BoxFuture};
 use bs_traits::sync::EphemeralSigningTuple;
-use bs_traits::{EphemeralKey, GetKey};
+use bs_traits::{EphemeralKey, GetKey, Signer};
 use multicodec::Codec;
 use multikey::Multikey;
 use provenance_log::Key;
@@ -12,7 +11,7 @@ use std::fmt::Debug;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-/// The Key Manager for Keystr client.
+/// The Key Store for Keystr client.
 pub struct Wallet<E = crate::Error> {
     /// Storage for secret keys
     keys: Arc<Mutex<HashMap<Vec<u8>, Multikey>>>,
@@ -77,7 +76,27 @@ impl<E> Wallet<E> {
     }
 }
 
-impl<E> GetKey for Wallet<E>
+pub struct KeyManager<E = crate::Error> {
+    wallet: Wallet<E>,
+}
+
+impl<E> KeyManager<E> {
+    pub fn new(wallet: Wallet<E>) -> Self {
+        Self { wallet }
+    }
+}
+
+pub struct P256Signer<E = crate::Error> {
+    wallet: Wallet<E>,
+}
+
+impl<E> P256Signer<E> {
+    pub fn new(wallet: Wallet<E>) -> Self {
+        Self { wallet }
+    }
+}
+
+impl<E> GetKey for KeyManager<E>
 where
     E: From<multikey::Error> + From<multihash::Error> + Debug,
 {
@@ -87,23 +106,7 @@ where
     type Error = E;
 }
 
-impl<E> Signer for Wallet<E>
-where
-    E: From<multikey::Error> + From<multihash::Error> + Debug,
-{
-    type KeyPath = Key;
-    type Signature = Signature;
-    type Error = E;
-}
-
-impl<E> EphemeralKey for Wallet<E>
-where
-    E: From<multikey::Error> + From<multihash::Error> + Debug,
-{
-    type PubKey = Multikey;
-}
-
-impl<E> AsyncKeyManager<E> for Wallet<E>
+impl<E> AsyncKeyManager<E> for KeyManager<E>
 where
     E: From<multikey::Error>
         + From<multihash::Error>
@@ -123,7 +126,7 @@ where
         Box::pin(async move {
             use multikey::Views as _;
             // Check if key already exists
-            if let Some(secret_key) = self.get_secret_key(key_path)? {
+            if let Some(secret_key) = self.wallet.get_secret_key(key_path)? {
                 return Ok(secret_key.conv_view()?.to_public_key()?);
             }
 
@@ -137,14 +140,45 @@ where
             let public_key = secret_key.conv_view()?.to_public_key()?;
 
             // Store the secret key
-            self.store_secret_key(key_path.clone(), secret_key)?;
+            self.wallet.store_secret_key(key_path.clone(), secret_key)?;
 
             Ok(public_key)
         })
     }
+
+    fn preprocess_vlad<'a>(&'a mut self, vlad: &'a multicid::Vlad) -> BoxFuture<'a, Result<(), E>> {
+        // assigns user_id to the Vlad
+        Box::pin(async move { Ok(()) })
+    }
 }
 
-impl<E> AsyncMultiSigner<Signature, E> for Wallet<E>
+impl<E> GetKey for P256Signer<E>
+where
+    E: From<multikey::Error> + From<multihash::Error> + Debug,
+{
+    type Key = Multikey;
+    type KeyPath = Key;
+    type Codec = Codec;
+    type Error = E;
+}
+
+impl<E> Signer for P256Signer<E>
+where
+    E: From<multikey::Error> + From<multihash::Error> + Debug,
+{
+    type KeyPath = Key;
+    type Signature = Signature;
+    type Error = E;
+}
+
+impl<E> EphemeralKey for P256Signer<E>
+where
+    E: From<multikey::Error> + From<multihash::Error> + Debug,
+{
+    type PubKey = Multikey;
+}
+
+impl<E> AsyncMultiSigner<Signature, E> for P256Signer<E>
 where
     E: From<multikey::Error>
         + From<multihash::Error>
@@ -182,7 +216,7 @@ where
     }
 }
 
-impl<E> AsyncSigner for Wallet<E>
+impl<E> AsyncSigner for P256Signer<E>
 where
     E: From<multikey::Error>
         + From<multihash::Error>
@@ -201,6 +235,7 @@ where
             use multikey::Views as _;
             // Get the secret key corresponding to the provided path
             let secret_key = self
+                .wallet
                 .get_secret_key(key_path)?
                 .ok_or(crate::Error::NoKeyPresent(key_path.clone()))?;
 
@@ -223,3 +258,4 @@ where
         })
     }
 }
+

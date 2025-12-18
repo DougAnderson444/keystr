@@ -1,4 +1,4 @@
-//! Browser-based passkey wallet for P256 signing in provenance logs
+//! Browser-based passkey wallet for P256 signing in provenance logs.
 //!
 //! This module provides a WebAuthn-based wallet that uses browser passkeys for
 //! signing provenance log entries with P256 keys, while using ephemeral Ed25519
@@ -78,13 +78,9 @@ struct CredentialInfo {
     public_key: Multikey,
 }
 
-/// Browser-based wallet using WebAuthn/Passkeys for P256 signing
-///
-/// This wallet manages P256 keys via browser passkeys for signing provenance log
-/// entries. The first entry uses an ephemeral Ed25519 key (as per provenance log
-/// design), while subsequent entries are signed with the user's passkey.
+/// Browser-based wallet using WebAuthn/Passkeys for P256 signing in provenance logs
 #[derive(Debug)]
-pub struct PasskeyWallet<E = PasskeyError> {
+pub struct PasskeyStore<E = PasskeyError> {
     /// Maps key paths to credential information
     credentials: Arc<Mutex<HashMap<Key, CredentialInfo>>>,
     /// Relying party ID (typically the domain, e.g., "example.com")
@@ -100,7 +96,7 @@ pub struct PasskeyWallet<E = PasskeyError> {
 }
 
 // Manually implement Clone to avoid requiring E: Clone
-impl<E> Clone for PasskeyWallet<E> {
+impl<E> Clone for PasskeyStore<E> {
     fn clone(&self) -> Self {
         Self {
             credentials: self.credentials.clone(),
@@ -113,7 +109,7 @@ impl<E> Clone for PasskeyWallet<E> {
     }
 }
 
-impl<E> PasskeyWallet<E> {
+impl<E> PasskeyStore<E> {
     /// Create a new passkey wallet
     ///
     /// # Arguments
@@ -142,6 +138,11 @@ impl<E> PasskeyWallet<E> {
         &self.user_name
     }
 
+    /// Set the user ID
+    pub fn set_user_id(&mut self, user_id: Vec<u8>) {
+        self.user_id = user_id;
+    }
+
     /// Check if a key exists at the given path
     pub fn has_key(&self, key_path: &Key) -> bool {
         self.credentials.lock().unwrap().contains_key(key_path)
@@ -154,7 +155,7 @@ impl<E> PasskeyWallet<E> {
 }
 
 #[cfg(feature = "web")]
-impl<E> PasskeyWallet<E>
+impl<E> PasskeyStore<E>
 where
     E: From<PasskeyError> + CondSend,
 {
@@ -408,29 +409,36 @@ where
     }
 }
 
-// Implement the required traits
-impl<E> GetKey for PasskeyWallet<E> {
+pub struct PasskeyKeyManager<E = PasskeyError> {
+    store: PasskeyStore<E>,
+}
+
+impl<E> PasskeyKeyManager<E> {
+    pub fn new(store: PasskeyStore<E>) -> Self {
+        Self { store }
+    }
+}
+
+pub struct PasskeyP256Signer<E = PasskeyError> {
+    store: PasskeyStore<E>,
+}
+
+impl<E> PasskeyP256Signer<E> {
+    pub fn new(store: PasskeyStore<E>) -> Self {
+        Self { store }
+    }
+}
+
+// Implement the required traits for PasskeyKeyManager
+impl<E> GetKey for PasskeyKeyManager<E> {
     type Key = Multikey;
     type KeyPath = Key;
     type Codec = Codec;
     type Error = E;
 }
 
-impl<E> Signer for PasskeyWallet<E>
-where
-    E: std::fmt::Debug,
-{
-    type KeyPath = Key;
-    type Signature = Multisig;
-    type Error = E;
-}
-
-impl<E> EphemeralKey for PasskeyWallet<E> {
-    type PubKey = Multikey;
-}
-
 #[cfg(feature = "web")]
-impl<E> AsyncKeyManager<E> for PasskeyWallet<E>
+impl<E> AsyncKeyManager<E> for PasskeyKeyManager<E>
 where
     E: From<PasskeyError>
         + From<multikey::Error>
@@ -448,7 +456,7 @@ where
     ) -> BoxFuture<'a, Result<Self::Key, E>> {
         Box::pin(async move {
             tracing::info!(
-                "PasskeyWallet::get_key called for path: {}, codec: {:?}",
+                "PasskeyKeyManager::get_key called for path: {}, codec: {:?}",
                 key_path,
                 codec
             );
@@ -456,7 +464,7 @@ where
                 Codec::P256Pub => {
                     // Check if we already have this key
                     let existing_key = {
-                        let creds = self.credentials.lock().unwrap();
+                        let creds = self.store.credentials.lock().unwrap();
                         creds
                             .get(key_path)
                             .map(|cred_info| cred_info.public_key.clone())
@@ -471,7 +479,7 @@ where
                             key_path
                         );
                         // Create a new passkey
-                        match self.create_passkey(key_path).await {
+                        match self.store.create_passkey(key_path).await {
                             Ok(key) => {
                                 tracing::info!(
                                     "Successfully created passkey for path: {}",
@@ -497,10 +505,42 @@ where
             }
         })
     }
+
+    fn preprocess_vlad<'a>(&'a mut self, vlad: &'a multicid::Vlad) -> BoxFuture<'a, Result<(), E>> {
+        Box::pin(async move {
+            tracing::info!("Preprocessing Vlad: {}", vlad);
+            // Set user_id as the Vlad's string representation
+            let vlad_string = vlad.to_string();
+            tracing::info!("Setting user_id to Vlad string: {}", vlad_string);
+            self.store.set_user_id(vlad_string.as_bytes().to_vec());
+            Ok(())
+        })
+    }
+}
+
+// Implement the required traits for PasskeyP256Signer
+impl<E> GetKey for PasskeyP256Signer<E> {
+    type Key = Multikey;
+    type KeyPath = Key;
+    type Codec = Codec;
+    type Error = E;
+}
+
+impl<E> Signer for PasskeyP256Signer<E>
+where
+    E: std::fmt::Debug,
+{
+    type KeyPath = Key;
+    type Signature = Multisig;
+    type Error = E;
+}
+
+impl<E> EphemeralKey for PasskeyP256Signer<E> {
+    type PubKey = Multikey;
 }
 
 #[cfg(feature = "web")]
-impl<E> AsyncSigner for PasskeyWallet<E>
+impl<E> AsyncSigner for PasskeyP256Signer<E>
 where
     E: From<PasskeyError>
         + From<multikey::Error>
@@ -515,12 +555,12 @@ where
         key: &'a Self::KeyPath,
         data: &'a [u8],
     ) -> BoxFuture<'a, Result<Self::Signature, Self::Error>> {
-        Box::pin(async move { self.sign_with_passkey(key, data).await })
+        Box::pin(async move { self.store.sign_with_passkey(key, data).await })
     }
 }
 
 #[cfg(feature = "web")]
-impl<E> AsyncMultiSigner<Multisig, E> for PasskeyWallet<E>
+impl<E> AsyncMultiSigner<Multisig, E> for PasskeyP256Signer<E>
 where
     E: From<PasskeyError>
         + From<multikey::Error>
@@ -577,22 +617,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wallet_creation() {
-        let wallet = PasskeyWallet::<PasskeyError>::new(
+    fn test_passkey_store_creation() {
+        let store = PasskeyStore::<PasskeyError>::new(
             "example.com".to_string(),
             "Example App".to_string(),
             "user@example.com".to_string(),
             vec![1, 2, 3, 4, 5, 6, 7, 8],
         );
 
-        assert_eq!(wallet.rp_id(), "example.com");
-        assert_eq!(wallet.user_name(), "user@example.com");
-        assert_eq!(wallet.list_credentials().len(), 0);
+        assert_eq!(store.rp_id(), "example.com");
+        assert_eq!(store.user_name(), "user@example.com");
+        assert_eq!(store.list_credentials().len(), 0);
     }
 
     #[test]
     fn test_credential_storage() {
-        let wallet = PasskeyWallet::<PasskeyError>::new(
+        let store = PasskeyStore::<PasskeyError>::new(
             "example.com".to_string(),
             "Example App".to_string(),
             "user@example.com".to_string(),
@@ -600,6 +640,7 @@ mod tests {
         );
 
         let key_path = Key::try_from("/test/key").unwrap();
-        assert!(!wallet.has_key(&key_path));
+        assert!(!store.has_key(&key_path));
     }
 }
+
