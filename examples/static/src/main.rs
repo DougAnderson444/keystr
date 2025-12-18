@@ -109,6 +109,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
             getrandom::getrandom(&mut buf)?;
             buf.to_vec()
         };
+        tracing::debug!("Generated user_id: {} bytes", user_id.len());
         
         let wallet: PasskeyWallet<bs::Error> = PasskeyWallet::new(
             web_sys::window()
@@ -118,6 +119,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
             "demo_user".to_string(),
             user_id,
         );
+        tracing::info!("PasskeyWallet created with rp_id: {}", wallet.rp_id());
         (wallet, Codec::P256Pub)
     };
     
@@ -128,6 +130,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     };
 
     tracing::info!("Building plog configuration...");
+    tracing::debug!("Using pubkey_codec: {:?}", pubkey_codec);
     let config = open::Config::builder()
         .vlad(VladParams::default())
         .pubkey(
@@ -151,9 +154,12 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
             "push(\"/entry/\"); push(\"/entry/proof\")".to_string(),
         ))
         .build();
+    tracing::debug!("Configuration built successfully");
 
     tracing::info!("Creating BetterSign instance...");
+    tracing::debug!("Calling BetterSign::new with PasskeyWallet...");
     let bs = BetterSign::new(config, wallet.clone(), wallet).await?;
+    tracing::info!("BetterSign instance created successfully");
 
     tracing::info!("Plog created successfully");
     let plog = bs.plog();

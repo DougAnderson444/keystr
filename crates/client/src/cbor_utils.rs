@@ -3,27 +3,7 @@
 //! This module provides functionality to extract P256 public keys from WebAuthn
 //! attestation objects, which are CBOR-encoded according to the WebAuthn spec.
 
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-/// CBOR value types used in WebAuthn attestation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum CborValue {
-    Int(i64),
-    Bytes(Vec<u8>),
-    Text(String),
-    Array(Vec<CborValue>),
-    Map(BTreeMap<CborKey, CborValue>),
-}
-
-/// CBOR keys can be integers or strings
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum CborKey {
-    Int(i64),
-    Text(String),
-}
+use serde_cbor::Value as CborValue;
 
 /// Extract P256 public key from WebAuthn attestation object
 /// 
@@ -38,14 +18,20 @@ pub enum CborKey {
 /// - y (-3): y-coordinate (32 bytes)
 pub fn extract_p256_public_key_from_attestation(attestation_object: &[u8]) -> Result<Vec<u8>, String> {
     // Parse CBOR attestation object
-    let attestation: BTreeMap<String, CborValue> = 
+    let attestation: CborValue = 
         serde_cbor::from_slice(attestation_object)
             .map_err(|e| format!("Failed to parse attestation object: {}", e))?;
     
-    // Get authData field
-    let auth_data = match attestation.get("authData") {
-        Some(CborValue::Bytes(data)) => data,
-        _ => return Err("Missing or invalid authData in attestation object".to_string()),
+    // Get authData field from the map
+    let auth_data = match &attestation {
+        CborValue::Map(map) => {
+            let auth_data_key = CborValue::Text("authData".to_string());
+            match map.get(&auth_data_key) {
+                Some(CborValue::Bytes(data)) => data,
+                _ => return Err("Missing or invalid authData in attestation object".to_string()),
+            }
+        }
+        _ => return Err("Attestation object is not a map".to_string()),
     };
     
     // Parse authenticator data to extract the credential public key
@@ -98,7 +84,7 @@ fn extract_public_key_from_auth_data(auth_data: &[u8]) -> Result<Vec<u8>, String
     let cose_key_bytes = &auth_data[offset..];
     
     // Parse COSE key
-    let cose_key: BTreeMap<CborKey, CborValue> = 
+    let cose_key: CborValue = 
         serde_cbor::from_slice(cose_key_bytes)
             .map_err(|e| format!("Failed to parse COSE key: {}", e))?;
     
@@ -109,27 +95,37 @@ fn extract_public_key_from_auth_data(auth_data: &[u8]) -> Result<Vec<u8>, String
 /// Extract P256 public key bytes from COSE key structure
 /// 
 /// Returns the uncompressed public key format (0x04 || x || y)
-fn extract_p256_from_cose_key(cose_key: &BTreeMap<CborKey, CborValue>) -> Result<Vec<u8>, String> {
+fn extract_p256_from_cose_key(cose_key: &CborValue) -> Result<Vec<u8>, String> {
+    // Get the map from the COSE key
+    let map = match cose_key {
+        CborValue::Map(m) => m,
+        _ => return Err("COSE key is not a map".to_string()),
+    };
+    
     // Check key type (kty = 1, should be 2 for EC2)
-    let _kty = match cose_key.get(&CborKey::Int(1)) {
-        Some(CborValue::Int(2)) => 2,
+    let kty_key = CborValue::Integer(1);
+    let _kty = match map.get(&kty_key) {
+        Some(CborValue::Integer(2)) => 2,
         _ => return Err("Invalid or missing key type (kty)".to_string()),
     };
     
     // Check algorithm (alg = 3, should be -7 for ES256/P-256)
-    let _alg = match cose_key.get(&CborKey::Int(3)) {
-        Some(CborValue::Int(-7)) => -7,
+    let alg_key = CborValue::Integer(3);
+    let _alg = match map.get(&alg_key) {
+        Some(CborValue::Integer(-7)) => -7,
         _ => return Err("Invalid or missing algorithm (alg), expected -7 for ES256".to_string()),
     };
     
     // Check curve (crv = -1, should be 1 for P-256)
-    let _crv = match cose_key.get(&CborKey::Int(-1)) {
-        Some(CborValue::Int(1)) => 1,
+    let crv_key = CborValue::Integer(-1);
+    let _crv = match map.get(&crv_key) {
+        Some(CborValue::Integer(1)) => 1,
         _ => return Err("Invalid or missing curve (crv), expected 1 for P-256".to_string()),
     };
     
     // Extract x coordinate (key = -2)
-    let x = match cose_key.get(&CborKey::Int(-2)) {
+    let x_key = CborValue::Integer(-2);
+    let x = match map.get(&x_key) {
         Some(CborValue::Bytes(bytes)) => {
             if bytes.len() != 32 {
                 return Err(format!("Invalid x coordinate length: {}", bytes.len()));
@@ -140,7 +136,8 @@ fn extract_p256_from_cose_key(cose_key: &BTreeMap<CborKey, CborValue>) -> Result
     };
     
     // Extract y coordinate (key = -3)
-    let y = match cose_key.get(&CborKey::Int(-3)) {
+    let y_key = CborValue::Integer(-3);
+    let y = match map.get(&y_key) {
         Some(CborValue::Bytes(bytes)) => {
             if bytes.len() != 32 {
                 return Err(format!("Invalid y coordinate length: {}", bytes.len()));

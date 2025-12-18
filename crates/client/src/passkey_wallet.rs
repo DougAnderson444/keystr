@@ -11,7 +11,7 @@ use bs_traits::asyncro::{AsyncKeyManager, AsyncMultiSigner, AsyncSigner, BoxFutu
 use bs_traits::sync::EphemeralSigningTuple;
 use bs_traits::{EphemeralKey, GetKey, Signer};
 use multicodec::Codec;
-use multikey::{Multikey, Views};
+use multikey::Multikey;
 use multisig::Multisig;
 use provenance_log::Key;
 use std::collections::HashMap;
@@ -165,9 +165,14 @@ where
         use wasm_bindgen::JsValue;
         use wasm_bindgen_futures::JsFuture;
 
+        tracing::info!("create_passkey: Starting passkey creation for path: {}", key_path);
+        
         let window = web_sys::window().ok_or(PasskeyError::NotSupported)?;
+        tracing::debug!("create_passkey: Got window object");
+        
         let navigator = window.navigator();
         let credentials_container = navigator.credentials();
+        tracing::debug!("create_passkey: Got credentials container");
 
         // Generate a random challenge
         let challenge = {
@@ -176,6 +181,7 @@ where
                 .map_err(|e| PasskeyError::WebAuthn(format!("Random generation failed: {}", e)))?;
             buf
         };
+        tracing::debug!("create_passkey: Generated challenge");
 
         // Build public key credential parameters for P256
         let pub_key_cred_params = js_sys::Array::new();
@@ -215,43 +221,70 @@ where
 
         let cred_options = CredentialCreationOptions::new();
         cred_options.set_public_key(&options);
+        tracing::debug!("create_passkey: Built credential creation options");
 
         // Create the credential
+        tracing::info!("create_passkey: Requesting credential creation from browser...");
         let promise = credentials_container
             .create_with_options(&cred_options)
-            .map_err(|e| PasskeyError::WebAuthn(format!("{:?}", e)))?;
+            .map_err(|e| PasskeyError::WebAuthn(format!("Failed to initiate credential creation: {:?}", e)))?;
 
+        tracing::info!("create_passkey: Waiting for user to complete passkey creation...");
         let result = JsFuture::from(promise)
             .await
-            .map_err(|e| PasskeyError::WebAuthn(format!("Credential creation failed: {:?}", e)))?;
+            .map_err(|e| {
+                tracing::error!("create_passkey: Credential creation failed: {:?}", e);
+                PasskeyError::WebAuthn(format!("Credential creation failed: {:?}", e))
+            })?;
+        tracing::info!("create_passkey: User completed passkey creation");
 
         let credential: PublicKeyCredential = result
             .dyn_into()
-            .map_err(|_| PasskeyError::WebAuthn("Invalid credential type".to_string()))?;
+            .map_err(|_| {
+                tracing::error!("create_passkey: Invalid credential type returned");
+                PasskeyError::WebAuthn("Invalid credential type".to_string())
+            })?;
+        tracing::debug!("create_passkey: Got PublicKeyCredential");
 
         let response: AuthenticatorAttestationResponse = credential
             .response()
             .dyn_into()
-            .map_err(|_| PasskeyError::WebAuthn("Invalid response type".to_string()))?;
+            .map_err(|_| {
+                tracing::error!("create_passkey: Invalid response type");
+                PasskeyError::WebAuthn("Invalid response type".to_string())
+            })?;
+        tracing::debug!("create_passkey: Got AuthenticatorAttestationResponse");
 
         // Extract credential ID
         let raw_id = credential.raw_id();
         let cred_id = js_sys::Uint8Array::new(&raw_id).to_vec();
+        tracing::debug!("create_passkey: Extracted credential ID, length: {}", cred_id.len());
 
         // Extract public key from attestation object
         let attestation_obj = response.attestation_object();
         let attestation_bytes = js_sys::Uint8Array::new(&attestation_obj).to_vec();
+        tracing::debug!("create_passkey: Extracted attestation object, length: {}", attestation_bytes.len());
 
+        tracing::debug!("create_passkey: Parsing attestation object to extract public key...");
         let public_key_bytes = extract_p256_public_key_from_attestation(&attestation_bytes)
-            .map_err(|e| PasskeyError::CborParsing(e))?;
+            .map_err(|e| {
+                tracing::error!("create_passkey: Failed to parse attestation: {}", e);
+                PasskeyError::CborParsing(e)
+            })?;
+        tracing::debug!("create_passkey: Extracted public key, length: {}", public_key_bytes.len());
 
         // Convert to Multikey (P256 public key)
         // The public key is in uncompressed format (0x04 || x || y), 65 bytes
+        tracing::debug!("create_passkey: Building Multikey from public key bytes...");
         use multikey::mk::Builder;
         let multikey = Builder::new(Codec::P256Pub)
             .with_key_bytes(&public_key_bytes)
             .try_build()
-            .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!("create_passkey: Failed to build Multikey: {}", e);
+                PasskeyError::Serialization(e.to_string())
+            })?;
+        tracing::debug!("create_passkey: Successfully built Multikey");
 
         // Store credential info
         let cred_info = CredentialInfo {
@@ -265,7 +298,7 @@ where
             .insert(key_path.clone(), cred_info.clone());
 
         tracing::info!(
-            "Created passkey for path {} with credential ID length {}",
+            "create_passkey: Successfully created and stored passkey for path {} with credential ID length {}",
             key_path,
             cred_info.credential_id.len()
         );
@@ -389,7 +422,7 @@ impl<E> EphemeralKey for PasskeyWallet<E> {
 #[cfg(feature = "web")]
 impl<E> AsyncKeyManager<E> for PasskeyWallet<E>
 where
-    E: From<PasskeyError> + From<multikey::Error> + From<multihash::Error> + Send + Sync + 'static,
+    E: From<PasskeyError> + From<multikey::Error> + From<multihash::Error> + std::fmt::Debug + Send + Sync + 'static,
 {
     fn get_key<'a>(
         &'a self,
@@ -399,6 +432,11 @@ where
         _limit: NonZeroUsize,
     ) -> BoxFuture<'a, Result<Self::Key, E>> {
         Box::pin(async move {
+            tracing::info!(
+                "PasskeyWallet::get_key called for path: {}, codec: {:?}",
+                key_path,
+                codec
+            );
             match codec {
                 Codec::P256Pub => {
                     // Check if we already have this key
@@ -410,13 +448,37 @@ where
                     }; // MutexGuard dropped here
 
                     if let Some(public_key) = existing_key {
+                        tracing::info!("Found existing key for path: {}", key_path);
                         Ok(public_key)
                     } else {
+                        tracing::info!(
+                            "No existing key found, creating new passkey for path: {}",
+                            key_path
+                        );
                         // Create a new passkey
-                        self.create_passkey(key_path).await
+                        match self.create_passkey(key_path).await {
+                            Ok(key) => {
+                                tracing::info!(
+                                    "Successfully created passkey for path: {}",
+                                    key_path
+                                );
+                                Ok(key)
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to create passkey for path {}: {:?}",
+                                    key_path,
+                                    e
+                                );
+                                Err(e)
+                            }
+                        }
                     }
                 }
-                _ => Err(PasskeyError::InvalidCodec(*codec).into()),
+                _ => {
+                    tracing::error!("Invalid codec requested: {:?}", codec);
+                    Err(PasskeyError::InvalidCodec(*codec).into())
+                }
             }
         })
     }
