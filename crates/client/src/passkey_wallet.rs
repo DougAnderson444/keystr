@@ -179,21 +179,20 @@ where
         Reflect::set(&user, &"displayName".into(), &self.user_name.clone().into())
             .map_err(|_| PasskeyError::WebAuthn("Failed to set user.displayName".to_string()))?;
 
-        // Create PublicKeyCredentialCreationOptions
+        // Create PublicKeyCredentialCreationOptions with proper constructor
         let options = PublicKeyCredentialCreationOptions::new(
-            &Uint8Array::from(&challenge[..]),
+            &Uint8Array::from(&challenge[..]).into(),
+            &pub_key_cred_params,
             &rp,
             &user,
-            &pub_key_cred_params,
         );
-
         options.set_timeout(60_000); // 60 seconds
         options.set_attestation(web_sys::AttestationConveyancePreference::None);
 
         // Set authenticator selection criteria
         let auth_selection = web_sys::AuthenticatorSelectionCriteria::new();
         auth_selection.set_user_verification(web_sys::UserVerificationRequirement::Preferred);
-        auth_selection.set_resident_key(web_sys::ResidentKeyRequirement::Required); // Discoverable credential
+        auth_selection.set_resident_key("required"); // Discoverable credential
         options.set_authenticator_selection(&auth_selection);
 
         let cred_options = CredentialCreationOptions::new();
@@ -230,7 +229,10 @@ where
 
         // Convert to Multikey (P256 public key)
         // The public key is in uncompressed format (0x04 || x || y), 65 bytes
-        let multikey = Multikey::try_from_key_bytes(Codec::P256Pub, &public_key_bytes)
+        use multikey::mk::Builder;
+        let multikey = Builder::new(Codec::P256Pub)
+            .with_key_bytes(&public_key_bytes)
+            .try_build()
             .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
 
         // Store credential info
@@ -247,9 +249,10 @@ where
         tracing::info!(
             "Created passkey for path {} with credential ID length {}",
             key_path,
-            multikey
-                .fingerprint_view()?
-                .fingerprint(Codec::Sha2256)?
+        use multikey::Views;
+        let fingerprint = multikey
+            .fingerprint_view()?
+            .fingerprint(Codec::Sha2256)?;
                 .len()
         );
 
@@ -264,14 +267,14 @@ where
         use js_sys::{Object, Reflect, Uint8Array};
         use wasm_bindgen_futures::JsFuture;
 
-        // Get credential info
-        let cred_info = {
+        // Get credential info and extract needed data before async operations
+        let (credential_id, _public_key) = {
             let creds = self.credentials.lock().unwrap();
-            creds
+            let cred_info = creds
                 .get(key_path)
-                .ok_or_else(|| PasskeyError::KeyNotFound(key_path.to_string()))?
-                .clone()
-        };
+                .ok_or_else(|| PasskeyError::KeyNotFound(key_path.to_string()))?;
+            (cred_info.credential_id.clone(), cred_info.public_key.clone())
+        }; // MutexGuard dropped here
 
         let window = web_sys::window().ok_or(PasskeyError::NotSupported)?;
         let navigator = window.navigator();
@@ -293,7 +296,7 @@ where
         Reflect::set(
             &cred_descriptor,
             &"id".into(),
-            &Uint8Array::from(&cred_info.credential_id[..]).into(),
+            &Uint8Array::from(&credential_id[..]).into(),
         )
         .map_err(|_| PasskeyError::WebAuthn("Failed to set id".to_string()))?;
         allowed_credentials.push(&cred_descriptor);
@@ -329,7 +332,10 @@ where
             .map_err(|e| PasskeyError::InvalidSignature(e))?;
 
         // Convert to Multisig (P256 signature)
-        let multisig = Multisig::try_from_sig_bytes(Codec::P256Sig, &raw_signature)
+        use multisig::ms::Builder as MsBuilder;
+        let multisig = MsBuilder::new(multicodec::Codec::EddsaMsig)
+            .with_signature_bytes(&raw_signature)
+            .try_build()
             .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
 
         tracing::debug!(
@@ -379,11 +385,14 @@ where
             match codec {
                 Codec::P256Pub => {
                     // Check if we already have this key
-                    let creds = self.credentials.lock().unwrap();
-                    if let Some(cred_info) = creds.get(key_path) {
-                        Ok(cred_info.public_key.clone())
+                    let existing_key = {
+                        let creds = self.credentials.lock().unwrap();
+                        creds.get(key_path).map(|cred_info| cred_info.public_key.clone())
+                    }; // MutexGuard dropped here
+                    
+                    if let Some(public_key) = existing_key {
+                        Ok(public_key)
                     } else {
-                        drop(creds); // Release lock before async operation
                         // Create a new passkey
                         self.create_passkey(key_path).await
                     }
@@ -429,8 +438,8 @@ where
     fn prepare_ephemeral_signing<'a>(
         &'a self,
         codec: &'a Codec,
-        threshold: NonZeroUsize,
-        limit: NonZeroUsize,
+        _threshold: NonZeroUsize,
+        _limit: NonZeroUsize,
     ) -> BoxFuture<'a, EphemeralSigningTuple<Self::PubKey, Multisig, E>> {
         Box::pin(async move {
             // For first entry, use Ed25519 ephemeral key
@@ -443,17 +452,23 @@ where
             let keypair = ed25519_dalek::SigningKey::generate(&mut csprng);
             let public_key_bytes = keypair.verifying_key();
 
-            let public_multikey =
-                Multikey::try_from_key_bytes(Codec::Ed25519Pub, public_key_bytes.as_bytes())
-                    .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
+            use multikey::mk::Builder;
+            let public_multikey = Builder::new(Codec::Ed25519Pub)
+                .with_key_bytes(&public_key_bytes.as_bytes())
+                .try_build()
+                .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
 
             // Create a signing closure that owns the keypair
-            let signer = Box::new(move |data: &[u8]| -> Result<Multisig, E> {
-                use ed25519_dalek::Signer as DalekSigner;
-                let sig = keypair.sign(data);
-                Multisig::try_from_sig_bytes(Codec::Ed25519Sig, &sig.to_bytes())
-                    .map_err(|e| PasskeyError::Serialization(e.to_string()).into())
-            });
+            let signer: Box<dyn FnOnce(&[u8]) -> Result<Multisig, E> + Send> =
+                Box::new(move |data: &[u8]| -> Result<Multisig, E> {
+                    use ed25519_dalek::Signer as DalekSigner;
+                    use multisig::ms::Builder as MsBuilder;
+                    let sig = keypair.sign(data);
+                    MsBuilder::new(multicodec::Codec::EddsaMsig)
+                        .with_signature_bytes(&sig.to_bytes())
+                        .try_build()
+                        .map_err(|e| PasskeyError::Serialization(e.to_string()).into())
+                });
 
             Ok((public_multikey, signer))
         })

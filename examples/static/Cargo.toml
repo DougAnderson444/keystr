@@ -9,6 +9,9 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.7.1", features = [] }
 keystr-client = { path = "../../crates/client" }
+bs = { path = "../../../../clones/bs/crates/bs" }
+multicodec = { path = "../../../../clones/bs/crates/multicodec" }
+provenance-log = { path = "../../../../clones/bs/crates/provenance-log" }
 
 [features]
 default = ["web"]

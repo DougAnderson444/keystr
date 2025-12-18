@@ -4,7 +4,8 @@ mod config;
 mod error;
 pub use error::{Error, Result};
 
-mod key_manager;
+pub mod key_manager;
+pub use key_manager::Wallet;
 
 /// Some references to webauthn functionality
 mod webauthn;
@@ -13,8 +14,6 @@ mod webauthn;
 mod cbor_utils;
 
 /// Passkey wallet for browser-based P256 signing
-/// Note: Currently has compilation issues with WebAuthn API usage
-/// Use the main Wallet in key_manager for general purpose key management
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub mod passkey_wallet;
 

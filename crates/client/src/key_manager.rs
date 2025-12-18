@@ -21,6 +21,16 @@ pub struct Wallet<E = crate::Error> {
     _phantom: std::marker::PhantomData<E>,
 }
 
+impl<E> Clone for Wallet<E> {
+    fn clone(&self) -> Self {
+        Self {
+            keys: self.keys.clone(),
+            paths: self.paths.clone(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 impl Default for Wallet {
     fn default() -> Self {
         Self::new()

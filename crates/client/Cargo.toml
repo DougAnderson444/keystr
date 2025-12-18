@@ -38,6 +38,8 @@ web-sys = { version = "0.3.83", features = [
   "PublicKeyCredentialParameters",
   "PublicKeyCredentialDescriptor",
   "PublicKeyCredentialType",
+  "PublicKeyCredentialRpEntity",
+  "PublicKeyCredentialUserEntity",
   "AuthenticatorSelectionCriteria",
   "AuthenticatorAttachment",
   "UserVerificationRequirement",
@@ -51,7 +53,7 @@ web-sys = { version = "0.3.83", features = [
   "Location",
 ], optional = true }
 base64-url = { version = "3.0.2", optional = true }
-getrandom = { version = "0.3", optional = true }
+getrandom = { version = "0.2", optional = true }
 
 [features]
 default = ["web"]
@@ -62,5 +64,5 @@ web = [
   "js-sys",
   "web-sys",
   "base64-url",
-  "getrandom/wasm_js",
+  "getrandom/js",
 ]
