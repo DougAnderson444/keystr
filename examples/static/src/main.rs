@@ -7,15 +7,9 @@ use bs::params::vlad::VladParams;
 use bs::BetterSign;
 use dioxus::{logger::tracing, prelude::*};
 
-#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
 use keystr_client::key_manager::Wallet;
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
 use keystr_client::passkey_wallet::PasskeyWallet;
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
 use multicid::{cid, Vlad};
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
 use multihash::mh;
 
 use multicodec::Codec;
@@ -106,7 +100,6 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     tracing::info!("Creating wallet...");
 
     // Use PasskeyWallet in browser, regular Wallet otherwise
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
     let (wallet, pubkey_codec) = {
         tracing::info!("Creating PasskeyWallet for browser...");
 
@@ -156,7 +149,6 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
         (wallet, Codec::P256Pub)
     };
 
-    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     let (wallet, pubkey_codec) = {
         tracing::info!("Creating standard Wallet (non-browser)...");
         (Wallet::new(), Codec::Ed25519Priv)

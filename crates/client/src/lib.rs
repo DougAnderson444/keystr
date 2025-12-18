@@ -14,10 +14,10 @@ mod webauthn;
 mod cbor_utils;
 
 /// Passkey wallet for browser-based P256 signing
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(feature = "web")]
 pub mod passkey_wallet;
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(feature = "web")]
 pub use passkey_wallet::PasskeyWallet;
 
 use bs::open_plog;

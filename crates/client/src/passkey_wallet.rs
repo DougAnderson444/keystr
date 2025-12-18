@@ -9,6 +9,8 @@ use crate::cbor_utils::{
 };
 use bs_traits::asyncro::{AsyncKeyManager, AsyncMultiSigner, AsyncSigner, BoxFuture};
 use bs_traits::sync::EphemeralSigningTuple;
+#[cfg(feature = "web")]
+use bs_traits::{CondSend, CondSync};
 use bs_traits::{EphemeralKey, GetKey, Signer};
 use multicodec::Codec;
 use multikey::Multikey;
@@ -154,7 +156,7 @@ impl<E> PasskeyWallet<E> {
 #[cfg(feature = "web")]
 impl<E> PasskeyWallet<E>
 where
-    E: From<PasskeyError> + Send,
+    E: From<PasskeyError> + CondSend,
 {
     /// Create a new passkey and store its credential ID and public key
     ///
@@ -165,11 +167,14 @@ where
         use wasm_bindgen::JsValue;
         use wasm_bindgen_futures::JsFuture;
 
-        tracing::info!("create_passkey: Starting passkey creation for path: {}", key_path);
-        
+        tracing::info!(
+            "create_passkey: Starting passkey creation for path: {}",
+            key_path
+        );
+
         let window = web_sys::window().ok_or(PasskeyError::NotSupported)?;
         tracing::debug!("create_passkey: Got window object");
-        
+
         let navigator = window.navigator();
         let credentials_container = navigator.credentials();
         tracing::debug!("create_passkey: Got credentials container");
@@ -227,29 +232,25 @@ where
         tracing::info!("create_passkey: Requesting credential creation from browser...");
         let promise = credentials_container
             .create_with_options(&cred_options)
-            .map_err(|e| PasskeyError::WebAuthn(format!("Failed to initiate credential creation: {:?}", e)))?;
+            .map_err(|e| {
+                PasskeyError::WebAuthn(format!("Failed to initiate credential creation: {:?}", e))
+            })?;
 
         tracing::info!("create_passkey: Waiting for user to complete passkey creation...");
-        let result = JsFuture::from(promise)
-            .await
-            .map_err(|e| {
-                tracing::error!("create_passkey: Credential creation failed: {:?}", e);
-                PasskeyError::WebAuthn(format!("Credential creation failed: {:?}", e))
-            })?;
+        let result = JsFuture::from(promise).await.map_err(|e| {
+            tracing::error!("create_passkey: Credential creation failed: {:?}", e);
+            PasskeyError::WebAuthn(format!("Credential creation failed: {:?}", e))
+        })?;
         tracing::info!("create_passkey: User completed passkey creation");
 
-        let credential: PublicKeyCredential = result
-            .dyn_into()
-            .map_err(|_| {
-                tracing::error!("create_passkey: Invalid credential type returned");
-                PasskeyError::WebAuthn("Invalid credential type".to_string())
-            })?;
+        let credential: PublicKeyCredential = result.dyn_into().map_err(|_| {
+            tracing::error!("create_passkey: Invalid credential type returned");
+            PasskeyError::WebAuthn("Invalid credential type".to_string())
+        })?;
         tracing::debug!("create_passkey: Got PublicKeyCredential");
 
-        let response: AuthenticatorAttestationResponse = credential
-            .response()
-            .dyn_into()
-            .map_err(|_| {
+        let response: AuthenticatorAttestationResponse =
+            credential.response().dyn_into().map_err(|_| {
                 tracing::error!("create_passkey: Invalid response type");
                 PasskeyError::WebAuthn("Invalid response type".to_string())
             })?;
@@ -258,12 +259,18 @@ where
         // Extract credential ID
         let raw_id = credential.raw_id();
         let cred_id = js_sys::Uint8Array::new(&raw_id).to_vec();
-        tracing::debug!("create_passkey: Extracted credential ID, length: {}", cred_id.len());
+        tracing::debug!(
+            "create_passkey: Extracted credential ID, length: {}",
+            cred_id.len()
+        );
 
         // Extract public key from attestation object
         let attestation_obj = response.attestation_object();
         let attestation_bytes = js_sys::Uint8Array::new(&attestation_obj).to_vec();
-        tracing::debug!("create_passkey: Extracted attestation object, length: {}", attestation_bytes.len());
+        tracing::debug!(
+            "create_passkey: Extracted attestation object, length: {}",
+            attestation_bytes.len()
+        );
 
         tracing::debug!("create_passkey: Parsing attestation object to extract public key...");
         let public_key_bytes = extract_p256_public_key_from_attestation(&attestation_bytes)
@@ -271,7 +278,10 @@ where
                 tracing::error!("create_passkey: Failed to parse attestation: {}", e);
                 PasskeyError::CborParsing(e)
             })?;
-        tracing::debug!("create_passkey: Extracted public key, length: {}", public_key_bytes.len());
+        tracing::debug!(
+            "create_passkey: Extracted public key, length: {}",
+            public_key_bytes.len()
+        );
 
         // Convert to Multikey (P256 public key)
         // The public key is in uncompressed format (0x04 || x || y), 65 bytes
@@ -422,7 +432,12 @@ impl<E> EphemeralKey for PasskeyWallet<E> {
 #[cfg(feature = "web")]
 impl<E> AsyncKeyManager<E> for PasskeyWallet<E>
 where
-    E: From<PasskeyError> + From<multikey::Error> + From<multihash::Error> + std::fmt::Debug + Send + Sync + 'static,
+    E: From<PasskeyError>
+        + From<multikey::Error>
+        + From<multihash::Error>
+        + std::fmt::Debug
+        + CondSync
+        + 'static,
 {
     fn get_key<'a>(
         &'a self,
