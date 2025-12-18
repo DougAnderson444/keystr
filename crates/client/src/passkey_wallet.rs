@@ -11,7 +11,7 @@ use bs_traits::asyncro::{AsyncKeyManager, AsyncMultiSigner, AsyncSigner, BoxFutu
 use bs_traits::sync::EphemeralSigningTuple;
 use bs_traits::{EphemeralKey, GetKey, Signer};
 use multicodec::Codec;
-use multikey::Multikey;
+use multikey::{Multikey, Views};
 use multisig::Multisig;
 use provenance_log::Key;
 use std::collections::HashMap;
@@ -54,6 +54,19 @@ pub enum PasskeyError {
     Multicid(#[from] multicid::Error),
 }
 
+// Implement conversion to bs::Error for use with BetterSign
+impl From<PasskeyError> for bs::Error {
+    fn from(err: PasskeyError) -> Self {
+        match err {
+            PasskeyError::Multikey(e) => bs::Error::Multikey(e),
+            PasskeyError::Multihash(e) => bs::Error::Multihash(e),
+            PasskeyError::Multicid(e) => bs::Error::Multicid(e),
+            // For all other passkey-specific errors, treat as key error
+            _ => bs::Error::Traits(bs_traits::Error::KeyError),
+        }
+    }
+}
+
 /// Stored credential information
 #[derive(Clone, Debug)]
 struct CredentialInfo {
@@ -68,7 +81,7 @@ struct CredentialInfo {
 /// This wallet manages P256 keys via browser passkeys for signing provenance log
 /// entries. The first entry uses an ephemeral Ed25519 key (as per provenance log
 /// design), while subsequent entries are signed with the user's passkey.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PasskeyWallet<E = PasskeyError> {
     /// Maps key paths to credential information
     credentials: Arc<Mutex<HashMap<Key, CredentialInfo>>>,
@@ -82,6 +95,20 @@ pub struct PasskeyWallet<E = PasskeyError> {
     user_id: Vec<u8>,
     /// Phantom data for error type
     _phantom: std::marker::PhantomData<E>,
+}
+
+// Manually implement Clone to avoid requiring E: Clone
+impl<E> Clone for PasskeyWallet<E> {
+    fn clone(&self) -> Self {
+        Self {
+            credentials: self.credentials.clone(),
+            rp_id: self.rp_id.clone(),
+            rp_name: self.rp_name.clone(),
+            user_name: self.user_name.clone(),
+            user_id: self.user_id.clone(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<E> PasskeyWallet<E> {
@@ -145,7 +172,7 @@ where
         // Generate a random challenge
         let challenge = {
             let mut buf = [0u8; 32];
-            getrandom::fill(&mut buf)
+            getrandom::getrandom(&mut buf)
                 .map_err(|e| PasskeyError::WebAuthn(format!("Random generation failed: {}", e)))?;
             buf
         };
@@ -159,25 +186,16 @@ where
             .map_err(|_| PasskeyError::WebAuthn("Failed to set alg".to_string()))?;
         pub_key_cred_params.push(&param);
 
-        // Build relying party object
-        let rp = Object::new();
-        Reflect::set(&rp, &"id".into(), &self.rp_id.clone().into())
-            .map_err(|_| PasskeyError::WebAuthn("Failed to set rp.id".to_string()))?;
-        Reflect::set(&rp, &"name".into(), &self.rp_name.clone().into())
-            .map_err(|_| PasskeyError::WebAuthn("Failed to set rp.name".to_string()))?;
+        // Build relying party object using proper web_sys type
+        let rp = web_sys::PublicKeyCredentialRpEntity::new(&self.rp_name);
+        rp.set_id(&self.rp_id);
 
-        // Build user object
-        let user = Object::new();
-        Reflect::set(
-            &user,
-            &"id".into(),
-            &Uint8Array::from(&self.user_id[..]).into(),
-        )
-        .map_err(|_| PasskeyError::WebAuthn("Failed to set user.id".to_string()))?;
-        Reflect::set(&user, &"name".into(), &self.user_name.clone().into())
-            .map_err(|_| PasskeyError::WebAuthn("Failed to set user.name".to_string()))?;
-        Reflect::set(&user, &"displayName".into(), &self.user_name.clone().into())
-            .map_err(|_| PasskeyError::WebAuthn("Failed to set user.displayName".to_string()))?;
+        // Build user object using proper web_sys type
+        let user = web_sys::PublicKeyCredentialUserEntity::new(
+            &self.user_name,
+            &self.user_name,
+            &Uint8Array::from(&self.user_id[..]),
+        );
 
         // Create PublicKeyCredentialCreationOptions with proper constructor
         let options = PublicKeyCredentialCreationOptions::new(
@@ -244,16 +262,12 @@ where
         self.credentials
             .lock()
             .unwrap()
-            .insert(key_path.clone(), cred_info);
+            .insert(key_path.clone(), cred_info.clone());
 
         tracing::info!(
             "Created passkey for path {} with credential ID length {}",
             key_path,
-        use multikey::Views;
-        let fingerprint = multikey
-            .fingerprint_view()?
-            .fingerprint(Codec::Sha2256)?;
-                .len()
+            cred_info.credential_id.len()
         );
 
         Ok(multikey)
@@ -273,7 +287,10 @@ where
             let cred_info = creds
                 .get(key_path)
                 .ok_or_else(|| PasskeyError::KeyNotFound(key_path.to_string()))?;
-            (cred_info.credential_id.clone(), cred_info.public_key.clone())
+            (
+                cred_info.credential_id.clone(),
+                cred_info.public_key.clone(),
+            )
         }; // MutexGuard dropped here
 
         let window = web_sys::window().ok_or(PasskeyError::NotSupported)?;
@@ -333,7 +350,7 @@ where
 
         // Convert to Multisig (P256 signature)
         use multisig::ms::Builder as MsBuilder;
-        let multisig = MsBuilder::new(multicodec::Codec::EddsaMsig)
+        let multisig = MsBuilder::new(multicodec::Codec::Es256Msig)
             .with_signature_bytes(&raw_signature)
             .try_build()
             .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
@@ -387,9 +404,11 @@ where
                     // Check if we already have this key
                     let existing_key = {
                         let creds = self.credentials.lock().unwrap();
-                        creds.get(key_path).map(|cred_info| cred_info.public_key.clone())
+                        creds
+                            .get(key_path)
+                            .map(|cred_info| cred_info.public_key.clone())
                     }; // MutexGuard dropped here
-                    
+
                     if let Some(public_key) = existing_key {
                         Ok(public_key)
                     } else {

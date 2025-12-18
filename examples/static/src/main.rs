@@ -1,12 +1,18 @@
 //! Static website which allows users to create and use plogs.
-use dioxus::{logger::tracing, prelude::*};
-use keystr_client::key_manager::Wallet;
-use bs::BetterSign;
 use bs::open;
 use bs::open::config::ValidatedKeyParams;
-use bs::params::vlad::VladParams;
 use bs::params::anykey::PubkeyParams;
 use bs::params::vlad::FirstEntryKeyParams;
+use bs::params::vlad::VladParams;
+use bs::BetterSign;
+use dioxus::{logger::tracing, prelude::*};
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+use keystr_client::key_manager::Wallet;
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use keystr_client::passkey_wallet::PasskeyWallet;
+
 use multicodec::Codec;
 use provenance_log::{Key, Script};
 
@@ -44,12 +50,12 @@ pub fn Hero() -> Element {
 pub fn NewPlog() -> Element {
     let mut status = use_signal(|| "Ready to create plog".to_string());
     let mut plog_created = use_signal(|| false);
-    let mut plog_info = use_signal(|| String::new());
+    let mut plog_info = use_signal(String::new);
 
     let create_plog = move |_| {
         tracing::info!("Create Plog button clicked");
         status.set("Creating provenance log...".to_string());
-        
+
         // Spawn async task to create plog
         spawn(async move {
             match create_plog_async().await {
@@ -75,12 +81,12 @@ pub fn NewPlog() -> Element {
                 disabled: plog_created(),
                 "Create New Plog"
             }
-            
+
             div { class: "mt-4 p-4 bg-gray-100 rounded",
                 p { class: "font-medium", "Status: " }
                 p { class: "text-sm", "{status}" }
             }
-            
+
             if plog_created() {
                 div { class: "mt-4 p-4 bg-green-100 border border-green-400 rounded",
                     h3 { class: "font-bold text-lg mb-2", "Plog Details:" }
@@ -93,14 +99,40 @@ pub fn NewPlog() -> Element {
 
 async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     tracing::info!("Creating wallet...");
-    let wallet = Wallet::new();
     
+    // Use PasskeyWallet in browser, regular Wallet otherwise
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    let (wallet, pubkey_codec) = {
+        tracing::info!("Creating PasskeyWallet for browser...");
+        let user_id = {
+            let mut buf = [0u8; 16];
+            getrandom::getrandom(&mut buf)?;
+            buf.to_vec()
+        };
+        
+        let wallet: PasskeyWallet<bs::Error> = PasskeyWallet::new(
+            web_sys::window()
+                .and_then(|w| w.location().hostname().ok())
+                .unwrap_or_else(|| "localhost".to_string()),
+            "Keystr Provenance Log".to_string(),
+            "demo_user".to_string(),
+            user_id,
+        );
+        (wallet, Codec::P256Pub)
+    };
+    
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    let (wallet, pubkey_codec) = {
+        tracing::info!("Creating standard Wallet (non-browser)...");
+        (Wallet::new(), Codec::Ed25519Priv)
+    };
+
     tracing::info!("Building plog configuration...");
     let config = open::Config::builder()
         .vlad(VladParams::default())
         .pubkey(
             PubkeyParams::builder()
-                .codec(Codec::Ed25519Priv)
+                .codec(pubkey_codec)
                 .build()
                 .into(),
         )
@@ -122,17 +154,21 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
 
     tracing::info!("Creating BetterSign instance...");
     let bs = BetterSign::new(config, wallet.clone(), wallet).await?;
-    
+
     tracing::info!("Plog created successfully");
     let plog = bs.plog();
-    
+
     // Create summary info
     let info = format!(
         "Plog Head: {}\nEntries: {}\nVerification: {}",
         plog.head,
         plog.entries.len(),
-        if plog.verify().count() > 0 { "Passed" } else { "Failed" }
+        if plog.verify().count() > 0 {
+            "Passed"
+        } else {
+            "Failed"
+        }
     );
-    
+
     Ok(info)
 }

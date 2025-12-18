@@ -34,4 +34,8 @@ pub enum Error {
     
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    #[error("Passkey error: {0}")]
+    Passkey(#[from] crate::passkey_wallet::PasskeyError),
 }
