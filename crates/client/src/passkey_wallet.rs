@@ -189,7 +189,7 @@ where
         // Generate a random challenge
         let challenge = {
             let mut buf = [0u8; 32];
-            getrandom::getrandom(&mut buf)
+            getrandom::fill(&mut buf)
                 .map_err(|e| PasskeyError::WebAuthn(format!("Random generation failed: {}", e)))?;
             buf
         };

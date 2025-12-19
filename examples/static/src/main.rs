@@ -107,7 +107,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
 
         let user_id = {
             let mut buf = [0u8; 16];
-            getrandom::getrandom(&mut buf)?;
+            getrandom::fill(&mut buf)?;
             buf.to_vec()
         };
         tracing::debug!("Generated initial user_id: {} bytes", user_id.len());
