@@ -36,7 +36,7 @@ impl GenerationConfig {
     /// - Unlock script that pushes entry and proof fields
     /// - Lock script that checks recovery key, pubkey, or pre-image proof
     pub fn new() -> Self {
-        let pubkey_params = PubkeyParams::builder().codec(Codec::Ed25519Priv).build();
+        let pubkey_params = PubkeyParams::builder().codec(Codec::P256Pub).build();
 
         let pubkey_key_path = pubkey_params.key_path().as_str();
         assert_eq!(pubkey_key_path, "/pubkey");
@@ -93,18 +93,17 @@ impl GenerationConfig {
               "#
         );
 
-        // The Type on VladParams ensures we use the same type for the first entry key
-        // which is used to generate the first lock script in the VladParams.
-        let vlad_params = VladParams::<FirstEntryKeyParams>::default();
-
-        let entry_key_params = FirstEntryKeyParams::builder()
-            .codec(Codec::Ed25519Priv)
-            .build();
-
-        let config = open::Config::builder() // Uses default type parameter FirstEntryKeyParams
-            .vlad(vlad_params)
+        let config = open::Config::builder()
+            // The Type on VladParams ensures we use the same type for the first entry key
+            // which is used to generate the first lock script in the VladParams.
+            .vlad(VladParams::<FirstEntryKeyParams>::default())
             .pubkey(pubkey_params.into())
-            .entrykey(entry_key_params.into())
+            .first_entry_params(
+                FirstEntryKeyParams::builder()
+                    .codec(Codec::Ed25519Priv)
+                    .build()
+                    .into(),
+            )
             .lock(Script::Code(Key::default(), lock))
             .unlock(Script::Code(Key::default(), unlock))
             .build();
