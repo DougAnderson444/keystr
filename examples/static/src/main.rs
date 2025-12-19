@@ -11,12 +11,7 @@ use dioxus::{logger::tracing, prelude::*};
 use keystr_client::key_manager::Wallet;
 
 #[cfg(all(feature = "web"))]
-use keystr_client::passkey_wallet::PasskeyWallet;
-
-#[cfg(all(feature = "web"))]
-use multicid::{cid, Vlad};
-#[cfg(all(feature = "web"))]
-use multihash::mh;
+use keystr_client::passkey_wallet::{PasskeyKeyManager, PasskeyP256Signer, PasskeyStore};
 
 use multicodec::Codec;
 use provenance_log::{Key, Script};
@@ -103,64 +98,46 @@ pub fn NewPlog() -> Element {
 }
 
 async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
-    tracing::info!("Creating wallet...");
+    tracing::info!("Creating wallet components...");
 
-    // Use PasskeyWallet in browser, regular Wallet otherwise
+    // Use Passkey-based managers in browser, regular Wallet otherwise
     #[cfg(all(feature = "web"))]
-    let (wallet, pubkey_codec) = {
-        tracing::info!("Creating PasskeyWallet for browser...");
-
-        // Generate vlad first to use as passkey identifier
-        let vlad = {
-            // Create a random cid for vlad generation
-            let random_bytes = {
-                let mut buf = [0u8; 32];
-                getrandom::getrandom(&mut buf)?;
-                buf
-            };
-
-            let cid = cid::Builder::new(Codec::Cidv1)
-                .with_target_codec(Codec::DagCbor)
-                .with_hash(
-                    &mh::Builder::new_from_bytes(Codec::Sha3512, &random_bytes)?.try_build()?,
-                )
-                .try_build()?;
-
-            // Generate vlad from ephemeral signature
-            Vlad::generate(&cid, |cid| {
-                let v: Vec<u8> = cid.clone().into();
-                Ok(v)
-            })?
-        };
+    let (key_manager, signer) = {
+        tracing::info!("Creating Passkey managers for browser...");
 
         let user_id = {
             let mut buf = [0u8; 16];
             getrandom::getrandom(&mut buf)?;
             buf.to_vec()
         };
-        tracing::debug!("Generated user_id: {} bytes", user_id.len());
+        tracing::debug!("Generated initial user_id: {} bytes", user_id.len());
 
-        // Use vlad's Display implementation for the username
-        let vlad_string = vlad.to_string();
-        tracing::info!("Using vlad as passkey username: {}", vlad_string);
-
-        let wallet: PasskeyWallet<bs::Error> = PasskeyWallet::new(
+        // The user_name is a display string, and user_id is the persistent identifier.
+        // preprocess_vlad will overwrite user_id with the vlad string.
+        let store = PasskeyStore::<bs::Error>::new(
             web_sys::window()
                 .and_then(|w| w.location().hostname().ok())
                 .unwrap_or_else(|| "localhost".to_string()),
             "Keystr Provenance Log".to_string(),
-            vlad_string,
+            "keystr-user".to_string(), // Will be overwritten by vlad when plog i created and
+            // preprocess_vlad is called.
             user_id,
         );
-        tracing::info!("PasskeyWallet created with rp_id: {}", wallet.rp_id());
-        (wallet, Codec::P256Pub)
+        tracing::info!("PasskeyStore created with rp_id: {}", store.rp_id());
+
+        let key_manager = PasskeyKeyManager::new(store.clone());
+        let signer = PasskeyP256Signer::new(store);
+
+        (key_manager, signer)
     };
 
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
-    let (wallet, pubkey_codec) = {
+    let (key_manager, signer) = {
         tracing::info!("Creating standard Wallet (non-browser)...");
-        (Wallet::new(), Codec::Ed25519Priv)
+        let wallet = Wallet::new();
+        (wallet.clone(), wallet)
     };
+    let pubkey_codec = Codec::P256Pub;
 
     tracing::info!("Building plog configuration...");
     tracing::debug!("Using pubkey_codec: {:?}", pubkey_codec);
@@ -185,8 +162,7 @@ async fn create_plog_async() -> Result<String, Box<dyn std::error::Error>> {
     tracing::debug!("Configuration built successfully");
 
     tracing::info!("Creating BetterSign instance...");
-    tracing::debug!("Calling BetterSign::new with PasskeyWallet...");
-    let bs = BetterSign::new(config, wallet.clone(), wallet).await?;
+    let bs = BetterSign::new(config, key_manager, signer).await?;
     tracing::info!("BetterSign instance created successfully");
 
     tracing::info!("Plog created successfully");

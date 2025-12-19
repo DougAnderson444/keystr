@@ -17,6 +17,7 @@ use multikey::Multikey;
 use multisig::Multisig;
 use provenance_log::Key;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
@@ -136,6 +137,11 @@ impl<E> PasskeyStore<E> {
     /// Get the user name
     pub fn user_name(&self) -> &str {
         &self.user_name
+    }
+
+    /// Set the user name
+    pub fn set_user_name(&mut self, user_name: String) {
+        self.user_name = user_name;
     }
 
     /// Set the user ID
@@ -508,11 +514,19 @@ where
 
     fn preprocess_vlad<'a>(&'a mut self, vlad: &'a multicid::Vlad) -> BoxFuture<'a, Result<(), E>> {
         Box::pin(async move {
+            use std::hash::Hasher;
+
             tracing::info!("Preprocessing Vlad: {}", vlad);
-            // Set user_id as the Vlad's string representation
-            let vlad_string = vlad.to_string();
-            tracing::info!("Setting user_id to Vlad string: {}", vlad_string);
-            self.store.set_user_id(vlad_string.as_bytes().to_vec());
+            // Use the Vlad's hash digest as user_id to respect the 64-byte limit
+            let mut s = std::hash::DefaultHasher::new();
+            vlad.hash(&mut s);
+            let digest = s.finish().to_le_bytes().to_vec();
+            tracing::info!(
+                "Setting user_id to Vlad hash digest ({} bytes)",
+                digest.len()
+            );
+            self.store.set_user_id(digest);
+            self.store.set_user_name(vlad.to_string());
             Ok(())
         })
     }
@@ -643,4 +657,3 @@ mod tests {
         assert!(!store.has_key(&key_path));
     }
 }
-
