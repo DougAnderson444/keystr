@@ -43,7 +43,7 @@ impl Keystr {
                 .unwrap_or_else(|| "localhost".to_string()),
             "Keystr Provenance Log".to_string(),
             "keystr-user".to_string(), // Will be overwritten by vlad
-            user_id,
+            user_id, // Will be overwritten by the std::hash::DefaultHasher digest of the vlad
         );
         tracing::info!("PasskeyStore created with rp_id: {}", store.rp_id());
 

@@ -16,6 +16,7 @@ use multicodec::Codec;
 use multikey::Multikey;
 use multisig::Multisig;
 use provenance_log::Key;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
@@ -514,13 +515,9 @@ where
 
     fn preprocess_vlad<'a>(&'a mut self, vlad: &'a multicid::Vlad) -> BoxFuture<'a, Result<(), E>> {
         Box::pin(async move {
-            use std::hash::Hasher;
-
             tracing::info!("Preprocessing Vlad: {}", vlad);
             // Use the Vlad's hash digest as user_id to respect the 64-byte limit
-            let mut s = std::hash::DefaultHasher::new();
-            vlad.hash(&mut s);
-            let digest = s.finish().to_le_bytes().to_vec();
+            let digest = Sha256::digest(vlad.to_string().as_bytes()).to_vec();
             tracing::info!(
                 "Setting user_id to Vlad hash digest ({} bytes)",
                 digest.len()
