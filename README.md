@@ -1,6 +1,17 @@
 # keystr
 
-A proof on concept experiment for combining provenance logs with passkeys to create a secure, multi-device, multi-key authentication system.
+A proof on concept experiment for combining provenance logs with passkeys to create a secure, multi-device, mulit-client, multi-key authentication system.
+
+## Why: Nostr use case 
+
+- log into a Nostr client from two different devices
+- want to avoid copying and pasting private keys
+- want to be able to delegate posting to a social media manager app without sharing private keys
+- want to be able to revoke access from a lost or compromised device
+- want to have a unified identity across multiple Nostr clients
+- want to be able to have multiple keys and key types (secp256k1, ed25519, P256, etc) associated with the same identity
+
+This currently cannot be done with a npub identifier alone. A better solution is needed.
 
 ## MVP: Same website, multiple devices
 
@@ -23,7 +34,7 @@ A proof on concept experiment for combining provenance logs with passkeys to cre
 
 ## Crosss-site authentication with unified identity
 
-- If the users wants to use this same identifier on another website, website B, the passkey is not listed in the plog key entry set for the vlad, the user is prompted to add the website B passkey to the plog by adding it while auth'd on website A.
+- If the users wants to use this same identifier on another website (classic example, another Nostr client but for the same account), say, website B, the passkey is not listed in the plog key entry set for the vlad, the user is prompted to add the website B passkey to the plog by adding it while auth'd on website A.
 - User scans the QR Code containing the passkey addition request.
 - User approves the addition of the website B passkey to the plog.
 - User is now authenticated to website B authorized to publish under the vlad.
