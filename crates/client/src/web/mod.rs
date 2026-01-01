@@ -61,4 +61,26 @@ impl Keystr {
         tracing::info!("Creating BetterSign instance...");
         Ok(BetterSign::new(&config, key_manager, signer).await?)
     }
+
+    /// Sign a piece of data using a passkey associated with the given vlad.
+    /// This will trigger the browser to prompt for a passkey.
+    pub async fn sign(vlad: &str, data: &[u8]) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        let user_id = Sha256::digest(vlad.as_bytes()).to_vec();
+
+        let store = PasskeyStore::<bs::Error>::new(
+            web_sys::window()
+                .and_then(|w| w.location().hostname().ok())
+                .unwrap_or_else(|| "localhost".to_string()),
+            "Keystr Provenance Log".to_string(),
+            vlad.to_string(),
+            user_id,
+        );
+
+        // We pass `None` for the key_path to trigger discoverable credential selection
+        let signature = store.sign_with_passkey(None, data).await?;
+
+        // Format signature for display
+        Ok(format!("Signature (ES256MSig): {:?}", signature))
+    }
 }

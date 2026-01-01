@@ -323,25 +323,27 @@ where
         Ok(multikey)
     }
 
-    /// Sign data using an existing passkey
-    ///
     /// This initiates the WebAuthn authentication flow, prompting the user to
     /// authenticate with their passkey and sign the provided data.
-    pub async fn sign_with_passkey(&self, key_path: &Key, data: &[u8]) -> Result<Multisig, E> {
+    ///
+    /// If `key_path` is `None`, the browser will be prompted to select from
+    /// any discoverable credentials (passkeys) available for this relying party.
+    pub async fn sign_with_passkey(
+        &self,
+        key_path: Option<&Key>,
+        data: &[u8],
+    ) -> Result<Multisig, E> {
         use js_sys::{Object, Reflect, Uint8Array};
         use wasm_bindgen_futures::JsFuture;
 
-        // Get credential info and extract needed data before async operations
-        let (credential_id, _public_key) = {
-            let creds = self.credentials.lock().unwrap();
-            let cred_info = creds
-                .get(key_path)
-                .ok_or_else(|| PasskeyError::KeyNotFound(key_path.to_string()))?;
-            (
-                cred_info.credential_id.clone(),
-                cred_info.public_key.clone(),
-            )
-        }; // MutexGuard dropped here
+        // Get credential info if key_path is provided and exists in the store
+        let credential_id: Option<Vec<u8>> = key_path.and_then(|kp| {
+            self.credentials
+                .lock()
+                .unwrap()
+                .get(kp)
+                .map(|cred_info| cred_info.credential_id.clone())
+        });
 
         let window = web_sys::window().ok_or(PasskeyError::NotSupported)?;
         let navigator = window.navigator();
@@ -355,19 +357,25 @@ where
         options.set_rp_id(&self.rp_id);
         options.set_user_verification(web_sys::UserVerificationRequirement::Preferred);
 
-        // Set allowed credentials (specify the exact credential to use)
-        let allowed_credentials = js_sys::Array::new();
-        let cred_descriptor = Object::new();
-        Reflect::set(&cred_descriptor, &"type".into(), &"public-key".into())
-            .map_err(|_| PasskeyError::WebAuthn("Failed to set type".to_string()))?;
-        Reflect::set(
-            &cred_descriptor,
-            &"id".into(),
-            &Uint8Array::from(&credential_id[..]).into(),
-        )
-        .map_err(|_| PasskeyError::WebAuthn("Failed to set id".to_string()))?;
-        allowed_credentials.push(&cred_descriptor);
-        options.set_allow_credentials(&allowed_credentials);
+        // If a credential_id is available, specify it to the browser.
+        // Otherwise, let the browser prompt the user to choose a passkey.
+        if let Some(cred_id) = credential_id {
+            tracing::debug!("Requesting signature for specific credential ID");
+            let allowed_credentials = js_sys::Array::new();
+            let cred_descriptor = Object::new();
+            Reflect::set(&cred_descriptor, &"type".into(), &"public-key".into())
+                .map_err(|_| PasskeyError::WebAuthn("Failed to set type".to_string()))?;
+            Reflect::set(
+                &cred_descriptor,
+                &"id".into(),
+                &Uint8Array::from(&cred_id[..]).into(),
+            )
+            .map_err(|_| PasskeyError::WebAuthn("Failed to set id".to_string()))?;
+            allowed_credentials.push(&cred_descriptor);
+            options.set_allow_credentials(&allowed_credentials);
+        } else {
+            tracing::debug!("No credential ID specified, letting browser select a passkey.");
+        }
 
         let cred_options = CredentialRequestOptions::new();
         cred_options.set_public_key(&options);
@@ -406,15 +414,13 @@ where
             .map_err(|e| PasskeyError::Serialization(e.to_string()))?;
 
         tracing::debug!(
-            "Signed data with passkey at path {}, signature length: {}",
-            key_path,
+            "Signed data with passkey, signature length: {}",
             raw_signature.len()
         );
 
         Ok(multisig)
     }
 }
-
 pub struct PasskeyKeyManager<E = PasskeyError> {
     store: PasskeyStore<E>,
 }
@@ -572,7 +578,7 @@ where
         key: &'a Self::KeyPath,
         data: &'a [u8],
     ) -> BoxFuture<'a, Result<Self::Signature, Self::Error>> {
-        Box::pin(async move { self.store.sign_with_passkey(key, data).await })
+        Box::pin(async move { self.store.sign_with_passkey(Some(key), data).await })
     }
 }
 
