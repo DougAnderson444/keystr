@@ -18,7 +18,6 @@ use multisig::Multisig;
 use provenance_log::Key;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
@@ -517,12 +516,19 @@ where
         Box::pin(async move {
             tracing::info!("Preprocessing Vlad: {}", vlad);
             // Use the Vlad's hash digest as user_id to respect the 64-byte limit
-            let digest = Sha256::digest(vlad.to_string().as_bytes()).to_vec();
-            tracing::info!(
-                "Setting user_id to Vlad hash digest ({} bytes)",
-                digest.len()
-            );
-            self.store.set_user_id(digest);
+            // A 32-byte hash indicates a user_id derived from a vlad.
+            // A 16-byte random id is used for initial creation.
+            // If we have a 32-byte ID, we assume it's from a cached vlad and shouldn't be overwritten.
+            if self.store.user_id.len() != 32 {
+                let digest = Sha256::digest(vlad.to_string().as_bytes()).to_vec();
+                tracing::info!(
+                    "Setting user_id to Vlad hash digest ({} bytes)",
+                    digest.len()
+                );
+                self.store.set_user_id(digest);
+            } else {
+                tracing::info!("User ID is already set from cached vlad, not overwriting.");
+            }
             self.store.set_user_name(vlad.to_string());
             Ok(())
         })

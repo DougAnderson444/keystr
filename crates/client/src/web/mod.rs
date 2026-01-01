@@ -1,22 +1,9 @@
 //! Module for web-related key management, including Passkey support.
 pub mod passkey_wallet;
-use bs::{
-    BetterSign,
-    config::asynchronous::{KeyManager, MultiSigner},
-    open::{self, config::ValidatedKeyParams as _},
-    params::{
-        anykey::PubkeyParams,
-        vlad::{FirstEntryKeyParams, VladParams},
-    },
-};
-use multicodec::Codec;
+use bs::BetterSign;
 pub use passkey_wallet::{PasskeyKeyManager, PasskeyP256Signer, PasskeyStore};
-use provenance_log::{Key, Script};
 
-use crate::{
-    Result,
-    config::{self, GenerationConfig},
-};
+use crate::{config::GenerationConfig, Result};
 
 /// Keystr Client
 ///
@@ -28,14 +15,33 @@ pub struct Keystr {
 }
 
 impl Keystr {
-    /// Create a new Keystr client
+    /// Create a new Keystr client with a fresh identity.
     pub async fn new() -> Result<Self> {
-        let user_id = {
+        let bs = Self::create_bs(None).await?;
+        Ok(Keystr { bs })
+    }
+
+    /// Create a new Keystr client from an existing vlad.
+    pub async fn from_vlad(vlad: &str) -> Result<Self> {
+        use sha2::{Digest, Sha256};
+        let user_id = Sha256::digest(vlad.as_bytes()).to_vec();
+        tracing::debug!(
+            "Creating Keystr from vlad, derived user_id: {} bytes",
+            user_id.len()
+        );
+        let bs = Self::create_bs(Some(user_id)).await?;
+        Ok(Keystr { bs })
+    }
+
+    /// Create a BetterSign instance with an optional user_id.
+    async fn create_bs(
+        user_id: Option<Vec<u8>>,
+    ) -> Result<BetterSign<PasskeyKeyManager<bs::Error>, PasskeyP256Signer<bs::Error>>> {
+        let final_user_id = user_id.unwrap_or_else(|| {
             let mut buf = [0u8; 16];
-            getrandom::fill(&mut buf)?;
+            getrandom::fill(&mut buf).expect("Should fill random bytes");
             buf.to_vec()
-        };
-        tracing::debug!("Generated initial user_id: {} bytes", user_id.len());
+        });
 
         let store = PasskeyStore::<bs::Error>::new(
             web_sys::window()
@@ -43,22 +49,16 @@ impl Keystr {
                 .unwrap_or_else(|| "localhost".to_string()),
             "Keystr Provenance Log".to_string(),
             "keystr-user".to_string(), // Will be overwritten by vlad
-            user_id, // Will be overwritten by the std::hash::DefaultHasher digest of the vlad
+            final_user_id, // Might be overwritten by preprocess_vlad if not 32 bytes
         );
         tracing::info!("PasskeyStore created with rp_id: {}", store.rp_id());
 
         let key_manager = PasskeyKeyManager::new(store.clone());
         let signer = PasskeyP256Signer::new(store);
 
-        let pubkey_codec = Codec::P256Pub;
-
-        tracing::info!("Building plog configuration...");
-        tracing::debug!("Using pubkey_codec: {:?}", pubkey_codec);
         let config = GenerationConfig::default();
-        tracing::debug!("Configuration built successfully");
 
         tracing::info!("Creating BetterSign instance...");
-        let bs = BetterSign::new(&config, key_manager, signer).await?;
-        Ok(Keystr { bs })
+        Ok(BetterSign::new(&config, key_manager, signer).await?)
     }
 }
