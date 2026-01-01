@@ -30,6 +30,15 @@ use web_sys::{
     PublicKeyCredentialRequestOptions,
 };
 
+/// The ES256 signature algorithm identifier for WebAuthn
+pub const WEBAUTHN_ES256_ALG: i32 = -7;
+
+/// The EdDSA signature algorithm identifier for WebAuthn
+pub const WEBAUTHN_EDDSA_ALG: i32 = -8;
+
+/// The RS256 signature algorithm identifier for WebAuthn
+pub const WEBAUTHN_RS256_ALG: i32 = -257;
+
 /// Errors that can occur in the passkey wallet
 #[derive(Debug, thiserror::Error)]
 pub enum PasskeyError {
@@ -200,7 +209,7 @@ where
         let param = Object::new();
         Reflect::set(&param, &"type".into(), &"public-key".into())
             .map_err(|_| PasskeyError::WebAuthn("Failed to set type".to_string()))?;
-        Reflect::set(&param, &"alg".into(), &JsValue::from(-7)) // ES256 (P-256)
+        Reflect::set(&param, &"alg".into(), &JsValue::from(WEBAUTHN_ES256_ALG)) // ES256 (P-256)
             .map_err(|_| PasskeyError::WebAuthn("Failed to set alg".to_string()))?;
         pub_key_cred_params.push(&param);
 
