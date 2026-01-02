@@ -7,11 +7,17 @@ A proof on concept experiment for combining provenance logs with passkeys to cre
 ## Why: Nostr use case 
 
 - log into a Nostr client from two different devices
+    - passkeys get teleported to each device securely
 - want to avoid copying and pasting private keys
+    - no more npub/nostr key management nightmares
 - want to be able to delegate posting to a social media manager app without sharing private keys
+    - you would delegate posting to their device's passkey, remove to revoke
 - want to be able to revoke access from a lost or compromised device
+    - remove that device's passkey from the provenance log
 - want to have a unified identity across multiple Nostr clients
+    - one provenance log to rule them all
 - want to be able to have multiple keys and key types (secp256k1, ed25519, P256, etc) associated with the same identity
+    - provenance log can store multiple key types
 
 This currently cannot be done with a npub identifier alone. A better solution is needed.
 
