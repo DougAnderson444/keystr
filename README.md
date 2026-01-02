@@ -40,7 +40,7 @@ This currently cannot be done with a npub identifier alone. A better solution is
 - User is prompted to authenticate using passkey.
 - User authenticates using passkey.
 
-## Crosss-site authentication with unified identity
+## Cross-site authentication with unified identity
 
 - If the users wants to use this same identifier on another website (classic example, another Nostr client but for the same account), say, website B, the passkey is not listed in the plog key entry set for the vlad, the user is prompted to add the website B passkey to the plog by adding it while auth'd on website A.
 - User scans the QR Code containing the passkey addition request.
