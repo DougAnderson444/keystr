@@ -23,7 +23,8 @@ jobs:
         run: just install-tailwind
 
       - name: Build Tailwind CSS
-        run: tailwindcss -i ./tailwind.css -o ./packages/web/assets/tailwind.css
+        run: tailwindcss -i ./tailwind.css -o ./assets/tailwind.css
+        working-directory: examples/static
 
       - name: Build static site
         run: just build-static

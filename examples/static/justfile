@@ -1,2 +1,9 @@
+css:
+  tailwindcss -i ./tailwind.css -o ./packages/web/assets/tailwind.css --watch
+
 serve:
   RUST_LOG=info dx serve --port 8081
+
+# Build the web app
+build-static:
+  dx bundle  --release --out-dir docs
