@@ -35,7 +35,7 @@ jobs:
 
       - name: Copy static site files to ./docs directory
         run: |
-          cp -r examples/static/dist/* docs/
+          cp -r examples/static/docs/* docs/
           
       - name: Upload static files as artifact
         id: deployment
