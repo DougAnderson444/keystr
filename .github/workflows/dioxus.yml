@@ -33,31 +33,16 @@ jobs:
       - name: Create docs directory
         run: mkdir -p docs/
 
-      - name: Inspect build output (diagnostic)
-        run: |
-          echo "Workspace root:"
-          ls -la
-          echo "examples/static:"
-          ls -la examples/static || true
-          echo "Recursive listing under examples/static/docs (if exists):"
-          ls -R examples/static/docs || true
-
-      - name: Copy static site files to ./docs directory (robust)
+      - name: Copy static site files to ./docs directory
         run: |
           mkdir -p docs/
-          # If dioxus produced a docs/public folder (public_dir = "public"), copy its contents into the repo docs root.
+          # If dioxus produced a docs/public folder (common with public_dir = "public"),
+          # copy its contents into the repo docs root so GitHub Pages sees index.html at docs/index.html.
           if [ -d examples/static/docs/public ]; then
-            echo "Copying examples/static/docs/public -> docs/"
             cp -r examples/static/docs/public/. docs/
-          # Otherwise, if docs contains an index.html at its root already, copy that.
-          elif [ -f examples/static/docs/index.html ]; then
-            echo "Copying examples/static/docs/* -> docs/"
-            cp -r examples/static/docs/. docs/
           else
-            echo "Error: could not find built site at examples/static/docs/public or examples/static/docs/index.html"
-            echo "Full tree under examples/static:"
-            ls -R examples/static || true
-            exit 1
+            # Fallback: copy whatever is in examples/static/docs (in case index.html is at that root).
+            cp -r examples/static/docs/. docs/
           fi
           
       - name: Upload static files as artifact
