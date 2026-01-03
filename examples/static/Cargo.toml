@@ -3,15 +3,16 @@ name = "static"
 version = "0.1.0"
 authors = ["Doug Anderson444 <douganderson444@gmail.com>"]
 edition = "2021"
+rust-version.workspace = true
 
 [dependencies]
 dioxus = { version = "0.7.1" }
-keystr-client = { path = "../../crates/client" }
-bs = { path = "../../../../clones/bs/crates/bs" }
-multicodec = { path = "../../../../clones/bs/crates/multicodec" }
-multicid = { path = "../../../../clones/bs/crates/multicid" }
-multihash = { path = "../../../../clones/bs/crates/multihash" }
-provenance-log = { path = "../../../../clones/bs/crates/provenance-log" }
+keystr-client.workspace = true
+bs.workspace = true
+multicodec.workspace = true
+multicid.workspace = true
+multihash.workspace = true
+provenance-log.workspace = true
 getrandom = { workspace = true, features = ["wasm_js"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 gloo-storage = "0.3.0"

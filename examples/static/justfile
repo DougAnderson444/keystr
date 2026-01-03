@@ -1,5 +1,5 @@
 css:
-  tailwindcss -i ./tailwind.css -o ./packages/web/assets/tailwind.css --watch
+  tailwindcss -i ./tailwind.css -o ./assets/tailwind.css --watch
 
 serve:
   RUST_LOG=info dx serve --port 8081

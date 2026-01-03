@@ -2,18 +2,19 @@
 name = "keystr-client"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 tracing.workspace = true
 thiserror.workspace = true
-bs = { path = "../../../../clones/bs/crates/bs" }
-bs-traits = { path = "../../../../clones/bs/crates/bs-traits" }
-multicodec = { path = "../../../../clones/bs/crates/multicodec" }
-multikey = { path = "../../../../clones/bs/crates/multikey" }
-multihash = { path = "../../../../clones/bs/crates/multihash" }
-multicid = { path = "../../../../clones/bs/crates/multicid" }
-multisig = { path = "../../../../clones/bs/crates/multisig" }
-provenance-log = { path = "../../../../clones/bs/crates/provenance-log" }
+bs.workspace = true
+bs-traits.workspace = true
+multicodec.workspace = true
+multikey.workspace = true
+multihash.workspace = true
+multicid.workspace = true
+multisig.workspace = true
+provenance-log.workspace = true
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 ciborium = "0.2"
