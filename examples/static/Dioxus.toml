@@ -1,6 +1,7 @@
 [application]
 
 [web.app]
+base_path = "keystr"
 
 # HTML title tag content
 title = "static"
