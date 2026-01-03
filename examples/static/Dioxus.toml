@@ -1,10 +1,11 @@
 [application]
+public_dir = "public"
 
 [web.app]
 base_path = "keystr"
 
 # HTML title tag content
-title = "static"
+title = "Keystr"
 
 # include `assets` in web platform
 [web.resource]
