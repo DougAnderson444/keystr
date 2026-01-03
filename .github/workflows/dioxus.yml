@@ -36,8 +36,6 @@ jobs:
       - name: Copy static site files to ./docs directory
         run: |
           mkdir -p docs/
-          # If dioxus produced a docs/public folder (common with public_dir = "public"),
-          # copy its contents into the repo docs root so GitHub Pages sees index.html at docs/index.html.
           if [ -d examples/static/docs/public ]; then
             cp -r examples/static/docs/public/. docs/
           else
