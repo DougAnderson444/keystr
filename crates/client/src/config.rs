@@ -39,17 +39,17 @@ impl GenerationConfig {
         let pubkey_params = PubkeyParams::builder().codec(Codec::P256Pub).build();
 
         let pubkey_key_path = pubkey_params.key_path().as_str();
-        assert_eq!(pubkey_key_path, "/pubkey");
+        debug_assert_eq!(pubkey_key_path, "/pubkey");
 
         // or we could use the asoc const from which it is derived
         let pubkey_ket_path = &*PubkeyParams::KEY_PATH;
-        assert_eq!(pubkey_ket_path, "/pubkey");
+        debug_assert_eq!(pubkey_ket_path, "/pubkey");
 
         let entry_key = Field::ENTRY;
-        assert_eq!(entry_key, "/entry/");
+        debug_assert_eq!(entry_key, "/entry/");
 
         let proof_key = Field::PROOF;
-        assert_eq!(proof_key, "/entry/proof");
+        debug_assert_eq!(proof_key, "/entry/proof");
 
         let unlock_old_school = format!(
             r#"
@@ -72,7 +72,7 @@ impl GenerationConfig {
           "#
         );
 
-        assert_eq!(unlock_old_school, unlock);
+        debug_assert_eq!(unlock_old_school, unlock);
 
         // Note: The First Lock script is embedded in VladParams,
         // since it's tightly coupled to the first entry key,
