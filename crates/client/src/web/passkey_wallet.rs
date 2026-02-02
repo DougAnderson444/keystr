@@ -7,6 +7,7 @@
 use crate::cbor_utils::{
     extract_p256_public_key_from_attestation, extract_p256_signature_from_der,
 };
+use base64::prelude::*;
 use bs_traits::asyncro::{AsyncKeyManager, AsyncMultiSigner, AsyncSigner, BoxFuture};
 use bs_traits::sync::EphemeralSigningTuple;
 #[cfg(feature = "web")]
@@ -16,7 +17,6 @@ use multicodec::Codec;
 use multikey::Multikey;
 use multisig::Multisig;
 use provenance_log::Key;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
@@ -64,6 +64,8 @@ pub enum PasskeyError {
     Multihash(#[from] multihash::Error),
     #[error("Multicid error: {0}")]
     Multicid(#[from] multicid::Error),
+    #[error("Base64 decode error: {0}")]
+    Base64Decode(#[from] base64::DecodeError),
 }
 
 // Implement conversion to bs::Error for use with BetterSign
@@ -183,6 +185,13 @@ impl<E> PasskeyStore<E> {
     /// This is used to get the credentialId after creating a new passkey.
     pub fn get_credential_info(&self, key_path: &Key) -> Option<CredentialInfo> {
         self.credentials.lock().unwrap().get(key_path).cloned()
+    /// Manually insert a credential into the store.
+    pub fn insert_credential(&self, key_path: Key, public_key: Multikey, credential_id: Vec<u8>) {
+        let cred_info = CredentialInfo {
+            credential_id,
+            public_key,
+        };
+        self.credentials.lock().unwrap().insert(key_path, cred_info);
     }
 }
 
@@ -322,6 +331,9 @@ where
         use multikey::mk::Builder;
         let multikey = Builder::new(Codec::P256Pub)
             .with_key_bytes(&public_key_bytes)
+            // let's put the credential_id as a comment so that another device
+            // can lookup the same credential as needed
+            .with_comment(&BASE64_STANDARD.encode(&cred_id))
             .try_build()
             .map_err(|e| {
                 tracing::error!("create_passkey: Failed to build Multikey: {}", e);
@@ -502,6 +514,10 @@ where
         _threshold: NonZeroUsize,
         _limit: NonZeroUsize,
     ) -> BoxFuture<'a, Result<Self::Key, E>> {
+        let store = self.store.clone();
+        let key_path = key_path.clone();
+        let codec = *codec;
+
         Box::pin(async move {
             tracing::info!(
                 "PasskeyKeyManager::get_key called for path: {}, codec: {:?}",
@@ -512,9 +528,9 @@ where
                 Codec::P256Pub => {
                     // Check if we already have this key
                     let existing_key = {
-                        let creds = self.store.credentials.lock().unwrap();
+                        let creds = store.credentials.lock().unwrap();
                         creds
-                            .get(key_path)
+                            .get(&key_path)
                             .map(|cred_info| cred_info.public_key.clone())
                     }; // MutexGuard dropped here
 
@@ -527,7 +543,7 @@ where
                             key_path
                         );
                         // Create a new passkey
-                        match self.store.create_passkey(key_path).await {
+                        match store.create_passkey(&key_path).await {
                             Ok(key) => {
                                 tracing::info!(
                                     "Successfully created passkey for path: {}",
@@ -548,32 +564,22 @@ where
                 }
                 _ => {
                     tracing::error!("Invalid codec requested: {:?}", codec);
-                    Err(PasskeyError::InvalidCodec(*codec).into())
+                    Err(PasskeyError::InvalidCodec(codec).into())
                 }
             }
         })
     }
 
     fn preprocess_vlad<'a>(&'a mut self, vlad: &'a multicid::Vlad) -> BoxFuture<'a, Result<(), E>> {
-        Box::pin(async move {
-            tracing::info!("Preprocessing Vlad: {}", vlad);
-            // Use the Vlad's hash digest as user_id to respect the 64-byte limit
-            // A 32-byte hash indicates a user_id derived from a vlad.
-            // A 16-byte random id is used for initial creation.
-            // If we have a 32-byte ID, we assume it's from a cached vlad and shouldn't be overwritten.
-            if self.store.user_id.len() != 32 {
-                let digest = Sha256::digest(vlad.to_string().as_bytes()).to_vec();
-                tracing::info!(
-                    "Setting user_id to Vlad hash digest ({} bytes)",
-                    digest.len()
-                );
-                self.store.set_user_id(digest);
-            } else {
-                tracing::info!("User ID is already set from cached vlad, not overwriting.");
-            }
-            self.store.set_user_name(vlad.to_string());
-            Ok(())
-        })
+        use sha2::{Digest, Sha256};
+
+        let vlad_str = vlad.to_string();
+        tracing::info!("Preprocessing Vlad, setting user_id from vlad hash");
+        let user_id = Sha256::digest(vlad_str.as_bytes()).to_vec();
+        self.store.set_user_id(user_id);
+        self.store.set_user_name(vlad_str);
+
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -605,8 +611,7 @@ where
         + From<multikey::Error>
         + From<multihash::Error>
         + std::fmt::Debug
-        + Send
-        + Sync
+        + CondSync
         + 'static,
 {
     fn try_sign<'a>(
@@ -614,7 +619,11 @@ where
         key: &'a Self::KeyPath,
         data: &'a [u8],
     ) -> BoxFuture<'a, Result<Self::Signature, Self::Error>> {
-        Box::pin(async move { self.store.sign_with_passkey(Some(key), data).await })
+        let store = self.store.clone();
+        let key = key.clone();
+        let data = data.to_vec();
+
+        Box::pin(async move { store.sign_with_passkey(Some(&key), &data).await })
     }
 }
 
@@ -626,8 +635,8 @@ where
         + From<multihash::Error>
         + From<multicid::Error>
         + std::fmt::Debug
-        + Send
-        + Sync
+        + CondSync
+        + Send // Required by AsyncMultiSigner trait even on wasm32
         + 'static,
 {
     fn prepare_ephemeral_signing<'a>(

@@ -42,4 +42,8 @@ pub enum Error {
     /// From [getrandom::Error]
     #[error(transparent)]
     GetRandom(#[from] getrandom::Error),
+
+    /// Generic error for string messages
+    #[error("{0}")]
+    Message(String),
 }
