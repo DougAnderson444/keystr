@@ -170,21 +170,6 @@ impl<E> PasskeyStore<E> {
         self.credentials.lock().unwrap().keys().cloned().collect()
     }
 
-    /// Add a credential to the store.
-    ///
-    /// This is used to populate the store with credentials from a loaded plog.
-    pub fn add_credential(&self, key_path: Key, cred_info: CredentialInfo) {
-        self.credentials
-            .lock()
-            .unwrap()
-            .insert(key_path, cred_info);
-    }
-
-    /// Get credential information for a given key path.
-    ///
-    /// This is used to get the credentialId after creating a new passkey.
-    pub fn get_credential_info(&self, key_path: &Key) -> Option<CredentialInfo> {
-        self.credentials.lock().unwrap().get(key_path).cloned()
     /// Manually insert a credential into the store.
     pub fn insert_credential(&self, key_path: Key, public_key: Multikey, credential_id: Vec<u8>) {
         let cred_info = CredentialInfo {
@@ -466,16 +451,6 @@ pub struct PasskeyKeyManager<E = PasskeyError> {
 impl<E> PasskeyKeyManager<E> {
     pub fn new(store: PasskeyStore<E>) -> Self {
         Self { store }
-    }
-
-    /// Add a credential to the underlying store.
-    pub fn add_credential(&self, key_path: Key, cred_info: CredentialInfo) {
-        self.store.add_credential(key_path, cred_info);
-    }
-
-    /// Get credential information from the underlying store.
-    pub fn get_credential_info(&self, key_path: &Key) -> Option<CredentialInfo> {
-        self.store.get_credential_info(key_path)
     }
 }
 
